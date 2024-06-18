@@ -4,7 +4,7 @@ import java.sql.Statement;
 import java.sql.*;
 public class conexion {
     public static void main(String[] args) throws SQLException{
-        Connection conn = DriverManager.getConnection("jdbc:postgresql://localhost:5432/DBProyect", "usuario", "contraseña");
+        Connection conn = DriverManager.getConnection("jdbc:postgresql://localhost:5432/DBProyect", "postgres", "joseph0721");
         /*
         try (Statement stmt = conn.createStatement();
             ResultSet rs = stmt.executeQuery("SELECT * FROM servicio")) {
