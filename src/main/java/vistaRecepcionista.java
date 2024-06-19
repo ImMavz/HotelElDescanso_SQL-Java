@@ -47,10 +47,6 @@ public class vistaRecepcionista extends JFrame {
         menuCobros.add(menuItemCobros);
         menuBar.add(menuCobros);
 
-        JMenu menuCuenta = new JMenu("Cuenta");
-        JMenuItem menuItemTotalAPagar = new JMenuItem("Total a Pagar");
-        menuCuenta.add(menuItemTotalAPagar);
-        menuBar.add(menuCuenta);
 
         setJMenuBar(menuBar);
 
@@ -90,7 +86,6 @@ public class vistaRecepcionista extends JFrame {
         menuItemListarClientesConReservas.addActionListener(e -> listarClientesConReservas());
         menuItemPrecioTotal.addActionListener(e -> consultarPrecioTotalCliente());
         menuItemCobros.addActionListener(e -> cardLayout.show(mainPanel, "Cobros"));
-        menuItemTotalAPagar.addActionListener(e -> cardLayout.show(mainPanel, "Cuenta"));
         menuItemAnadirCliente.addActionListener(e -> cardLayout.show(mainPanel, "AnadirCliente"));
 
     }
@@ -455,10 +450,12 @@ public class vistaRecepcionista extends JFrame {
 
             Connection connection = DriverManager.getConnection(url, user, password);
 
-            String query = "SELECT c.nombre, c.cedula, r.habitacion_reserva, h.habitacion_tipo " +
+            String query = "SELECT c.nombre, c.cedula, r.habitacion_reserva, h.habitacion_tipo, " +
+                    "CASE WHEN ch.cliente IS NOT NULL THEN ch.descuento ELSE NULL END AS descuento " +
                     "FROM cliente c " +
                     "JOIN reserva r ON c.cedula = r.cliente_reserva " +
                     "JOIN habitacion h ON r.habitacion_reserva = h.n_habitacion " +
+                    "LEFT JOIN clientes_habituales ch ON c.cedula = ch.cliente " +
                     "ORDER BY c.nombre";
 
             Statement statement = connection.createStatement();
@@ -469,11 +466,17 @@ public class vistaRecepcionista extends JFrame {
                 int cedula = resultSet.getInt("cedula");
                 int habitacion = resultSet.getInt("habitacion_reserva");
                 String tipoHabitacion = resultSet.getString("habitacion_tipo");
+                Integer descuento = (Integer) resultSet.getObject("descuento");
 
                 textAreaClientes.append("Nombre: " + nombre + "\n");
                 textAreaClientes.append("Cédula: " + cedula + "\n");
                 textAreaClientes.append("Habitación: " + habitacion + "\n");
                 textAreaClientes.append("Tipo de Habitación: " + tipoHabitacion + "\n");
+                if (descuento != null) {
+                    textAreaClientes.append("Descuento: " + descuento + "%\n");
+                } else {
+                    textAreaClientes.append("Descuento: N/A\n");
+                }
                 textAreaClientes.append("\n");
             }
 
@@ -490,16 +493,10 @@ public class vistaRecepcionista extends JFrame {
     // Método para consultar el precio total del cliente
     private void consultarPrecioTotalCliente() {
         JTextField textCedulaCliente = new JTextField();
-        JComboBox<String> comboBoxTipoHabitacion = new JComboBox<>(new String[]{"Sencilla", "Doble", "Matrimonial", "Suite sencilla", "Suite presidencial"});
-        JTextField textNumeroNoches = new JTextField();
 
-        JPanel panel = new JPanel(new GridLayout(3, 2));
+        JPanel panel = new JPanel(new GridLayout(1, 2));
         panel.add(new JLabel("Cédula del Cliente:"));
         panel.add(textCedulaCliente);
-        panel.add(new JLabel("Tipo de Habitación:"));
-        panel.add(comboBoxTipoHabitacion);
-        panel.add(new JLabel("Número de Noches:"));
-        panel.add(textNumeroNoches);
 
         int option = JOptionPane.showConfirmDialog(this, panel, "Consultar Precio Total",
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
@@ -507,50 +504,69 @@ public class vistaRecepcionista extends JFrame {
         if (option == JOptionPane.OK_OPTION) {
             try {
                 int cedulaCliente = Integer.parseInt(textCedulaCliente.getText());
-                String tipoHabitacion = comboBoxTipoHabitacion.getSelectedItem().toString();
-                int numeroNoches = Integer.parseInt(textNumeroNoches.getText());
-
-                if (numeroNoches <= 0) {
-                    JOptionPane.showMessageDialog(this, "El número de noches debe ser mayor que cero.");
-                    return;
-                }
-
-                int precioTotal = calcularPrecioTotal(cedulaCliente, tipoHabitacion, numeroNoches);
-                JOptionPane.showMessageDialog(this, "El precio total es: " + precioTotal + " COP.");
-
+                calcularPrecioTotal(cedulaCliente);
             } catch (NumberFormatException ex) {
-                JOptionPane.showMessageDialog(this, "Por favor ingrese datos válidos.");
+                JOptionPane.showMessageDialog(this, "Por favor ingrese un número de cédula válido.");
             }
         }
     }
 
-    private int calcularPrecioTotal(int cedulaCliente, String tipoHabitacion, int numeroNoches) {
+    private void calcularPrecioTotal(int cedulaCliente) {
         String url = "jdbc:postgresql://localhost:5432/DBProyect"; // Cambia esta URL según tu configuración
         String user = "postgres"; // Usuario de la base de datos
         String password = "joseph0721"; // Contraseña de la base de datos
 
-        int precioTotal = 0;
+        JPanel panelResultado = new JPanel(new BorderLayout());
+        JTextArea textAreaResultado = new JTextArea(10, 30);
+        textAreaResultado.setEditable(false);
+        JScrollPane scrollPane = new JScrollPane(textAreaResultado);
+        panelResultado.add(scrollPane, BorderLayout.CENTER);
 
         try (Connection connection = DriverManager.getConnection(url, user, password)) {
-            String queryPrecio = "SELECT precio FROM tipo_habitacion WHERE tipo = ?";
-            try (PreparedStatement psPrecio = connection.prepareStatement(queryPrecio)) {
-                psPrecio.setString(1, tipoHabitacion);
-                ResultSet rs = psPrecio.executeQuery();
+            String query = "SELECT r.n_dias, t.precio, " +
+                    "CASE WHEN ch.cliente IS NOT NULL THEN ch.descuento ELSE NULL END AS descuento " +
+                    "FROM cliente c " +
+                    "JOIN reserva r ON c.cedula = r.cliente_reserva " +
+                    "JOIN habitacion h ON r.habitacion_reserva = h.n_habitacion " +
+                    "JOIN tipo_habitacion t ON h.habitacion_tipo = t.tipo " +
+                    "LEFT JOIN clientes_habituales ch ON c.cedula = ch.cliente " +
+                    "WHERE c.cedula = ?";
+            try (PreparedStatement ps = connection.prepareStatement(query)) {
+                ps.setInt(1, cedulaCliente);
+                ResultSet rs = ps.executeQuery();
                 if (rs.next()) {
+                    int numeroNoches = rs.getInt("n_dias");
                     int precioPorNoche = rs.getInt("precio");
-                    precioTotal = precioPorNoche * numeroNoches;
+                    Integer descuento = (Integer) rs.getObject("descuento");
+
+                    int precioTotal;
+                    if (descuento != null) {
+                        precioTotal = (precioPorNoche * numeroNoches * (100 - descuento)) / 100;
+                        textAreaResultado.append("Cliente Habitual\n");
+                        textAreaResultado.append("Descuento: " + descuento + "%\n");
+                    } else {
+                        precioTotal = precioPorNoche * numeroNoches;
+                        textAreaResultado.append("Cliente Esporádico\n");
+                        textAreaResultado.append("Descuento: N/A\n");
+                    }
+
+                    textAreaResultado.append("Número de Noches: " + numeroNoches + "\n");
+                    textAreaResultado.append("Precio por Noche: " + precioPorNoche + "\n");
+                    textAreaResultado.append("Precio Total: " + precioTotal + " unidades monetarias\n");
                 } else {
-                    JOptionPane.showMessageDialog(this, "No se encontró el tipo de habitación.");
+                    JOptionPane.showMessageDialog(this, "No se encontró un cliente con esa cédula.");
                 }
             }
 
         } catch (SQLException e) {
             e.printStackTrace();
-            JOptionPane.showMessageDialog(this, "Error al calcular el precio total.");
+            JOptionPane.showMessageDialog(this, "Error al consultar la base de datos.");
         }
 
-        return precioTotal;
+        JOptionPane.showMessageDialog(this, panelResultado, "Precio Total del Cliente", JOptionPane.PLAIN_MESSAGE);
     }
+
+
 
     public boolean isNumeric(String str) {
         try {
